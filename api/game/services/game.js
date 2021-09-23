@@ -2,6 +2,7 @@ const axios = require('axios');
 const jsdom = require('jsdom');
 const slugify = require('slugify');
 const FormData = require('form-data');
+const qs = require('querystring');
 
 'use strict';
 
@@ -149,7 +150,7 @@ async function setImage({ image, game, field = 'cover' }) {
 module.exports = {
   populate: async params => {
     try {
-      const gogApiUrl = `https://www.gog.com/games/ajax/filtered?mediaType=game&page=1&sort=popularity`;
+      const gogApiUrl = `https://www.gog.com/games/ajax/filtered?mediaType=game&${qs.stringify(params)}`;
       const { data: { products } } = await axios.get(gogApiUrl);
 
       await createManyToManyData(products);
