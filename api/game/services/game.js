@@ -1,6 +1,7 @@
 const axios = require('axios');
 const jsdom = require('jsdom');
 const slugify = require('slugify');
+const FormData = require('form-data');
 
 'use strict';
 
@@ -8,6 +9,10 @@ const slugify = require('slugify');
  * Read the documentation (https://strapi.io/documentation/developer-docs/latest/development/backend-customization.html#core-services)
  * to customize this service
  */
+
+function timeout(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function getGameInfo(slug) {
   const { JSDOM } = jsdom;
@@ -66,11 +71,75 @@ async function createManyToManyData(products) {
   ]);
 }
 
+async function createGames(products) {
+  await Promise.all(
+    products.map(async product => {
+      const item = await getByName(product.title, 'game');
+      if (!item) {
+        console.info(`Creating ${product.title}...`);
+
+        const game = await strapi.services.game.create({
+          name: product.title,
+          slug: product.slug.replace(/_/g, '-'),
+          price: product.price.amount,
+          release_date: new Date(Number(product.globalReleaseDate) * 1000)
+            .toISOString(),
+          categories: await Promise.all(
+            product.genres.map(name => getByName(name, 'category'))
+          ),
+          platforms: await Promise.all(
+            product.supportedOperatingSystems.map(name => getByName(name, 'platform'))
+          ),
+          developers: [await getByName(product.developer, 'developer')],
+          publisher: await getByName(product.publisher, 'publisher'),
+          ...(await getGameInfo(product.slug)),
+        });
+
+        await setImage({ image: product.image, game });
+        await Promise.all(
+          product.gallery
+            .slice(0, 5)
+            .map(url => setImage({ image: url, game, field: 'gallery' }))
+        );
+
+        await timeout(2000);
+
+        return game;
+      }
+    })
+  )
+}
+
+async function setImage({ image, game, field = 'cover' }) {
+  const url = `https:${image}_bg_crop_1680x655.jpg`;
+  console.info(url);
+  const { data } = await axios.get(url, { responseType: 'arraybuffer' });
+  const buffer = Buffer.from(data, 'base64');
+
+  const formData = new FormData();
+  formData.append('refId', game.id);
+  formData.append('ref', 'game');
+  formData.append('field', field);
+  formData.append('files', buffer, { filename: `${game.slug}.jpg`});
+
+  console.info(`Uploading ${field} image: ${game.slug}.jpg`);
+
+  await axios({
+    method: 'POST',
+    url: `http://${strapi.config.host}:${strapi.config.port}/upload`,
+    data: formData,
+    headers: {
+      'Content-type': `multipart/form-data; boundary=${formData._boundary}`
+    }
+  })
+}
+
 module.exports = {
   populate: async params => {
     const gogApiUrl = `https://www.gog.com/games/ajax/filtered?mediaType=game&page=1&sort=popularity`;
     const { data: { products } } = await axios.get(gogApiUrl);
 
     await createManyToManyData(products);
+    await createGames([products[0], products[1]]);
   }
 };
