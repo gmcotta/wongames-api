@@ -48,7 +48,7 @@ async function create(name, entityName) {
   if (!item) {
     return await strapi.services[entityName].create({
       name,
-      slug: slugify(name, { lower: true }),
+      slug: slugify(name, { strict: true, lower: true }),
     })
   }
 }
@@ -58,6 +58,7 @@ async function createManyToManyData(products) {
   const publishers = {};
   const categories = {};
   const platforms = {};
+  console.log('createManyToManyData')
 
   products.forEach(product => {
     const { developer, publisher, genres, supportedOperatingSystems } = product;
@@ -152,7 +153,6 @@ module.exports = {
     try {
       const gogApiUrl = `https://www.gog.com/games/ajax/filtered?mediaType=game&${qs.stringify(params)}`;
       const { data: { products } } = await axios.get(gogApiUrl);
-
       await createManyToManyData(products);
       await createGames(products);
     } catch (e) {
