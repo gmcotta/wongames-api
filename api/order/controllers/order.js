@@ -1,35 +1,26 @@
 'use strict';
 
 const stripe = require('stripe')(process.env.STRIPE_PRIVATE_KEY)
+const { sanitizeEntity } = require('strapi-utils')
 
 module.exports = {
   createPaymentIntent: async (ctx) => {
     const { cart } = ctx.request.body
-    let games = []
-    await Promise.all(
-      cart?.map(async (game) => {
-        const validGame = await strapi.services.game.findOne({ id: game.id })
-        if (validGame) games.push(validGame)
-      })
-    )
+    const cartGameIds = await strapi.config.functions.cart.cartGameIds(cart)
+    const games = await strapi.config.functions.cart.cartItems(cartGameIds)
     if(!games.length) {
       ctx.response.status = 404
       return {
         error: 'No valid games found'
       }
     }
-    const total = games.reduce((acc, game) => {
-      return acc + game.price
-    }, 0)
-    if(total === 0) {
-      return { freeGames: true }
-    }
-    const total_in_cents = total * 100
+    const amount = await strapi.config.functions.cart.total(games)
+    if (amount === 0) return { freeGames: true }
     try {
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: total_in_cents,
+        amount,
         currency: 'usd',
-        metadata: { integration_check: "accept_a_payment" }
+        metadata: { cart: JSON.stringify(cartGameIds) }
       })
       return paymentIntent
     } catch(err) {
@@ -43,7 +34,18 @@ module.exports = {
     const userInfo = await strapi
       .query('user', 'users-permissions')
       .findOne({ id: userId })
-
-    return { cart, paymentIntentId, paymentMethod, userInfo }
+    const cartGameIds = await strapi.config.functions.cart.cartGameIds(cart)
+    const games = await strapi.config.functions.cart.cartItems(cartGameIds)
+    const total_in_cents = await strapi.config.functions.cart.total(games)
+    const entry = {
+      total_in_cents,
+      payment_intent_id: paymentIntentId,
+      card_brand: null,
+      card_last4: null,
+      games,
+      user: userInfo
+    }
+    const entity = await strapi.services.order.create(entry)
+    return sanitizeEntity(entity, { model: strapi.models.order })
   }
 };
